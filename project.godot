@@ -1,0 +1,35 @@
+; Engine configuration file.
+
+config_version=5
+
+[application]
+
+config/name="Arrow Escape"
+run/main_scene="res://scenes/main_menu.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[autoload]
+
+PlayerData="*res://scripts/player_data.gd"
+
+[display]
+
+window/size/viewport_width=480
+window/size/viewport_height=854
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep_width"
+window/handheld/orientation=1
+
+[input]
+
+click={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":1,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":true,"double_click":false,"script":null)
+]
+}
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
