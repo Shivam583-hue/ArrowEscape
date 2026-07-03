@@ -11,7 +11,6 @@ var lives: int = LIVES_MAX
 var lives_lost_time: float = 0.0
 var current_level: int = 1
 var highest_unlocked: int = 1
-var hints_used: int = 0
 
 func _ready():
 	load_data()
@@ -82,8 +81,16 @@ func load_data():
 		return
 	var data = json.data
 	if data is Dictionary:
-		coins = data.get("coins", 0)
-		lives = data.get("lives", LIVES_MAX)
-		lives_lost_time = data.get("lives_lost_time", 0.0)
-		current_level = data.get("current_level", 1)
-		highest_unlocked = data.get("highest_unlocked", 1)
+		coins = maxi(_as_int(data.get("coins"), 0), 0)
+		lives = clampi(_as_int(data.get("lives"), LIVES_MAX), 0, LIVES_MAX)
+		lives_lost_time = maxf(_as_float(data.get("lives_lost_time"), 0.0), 0.0)
+		current_level = maxi(_as_int(data.get("current_level"), 1), 1)
+		highest_unlocked = maxi(_as_int(data.get("highest_unlocked"), 1), 1)
+
+# JSON numbers parse as floats and the file is user-editable, so coerce
+# and range-check every field instead of trusting it.
+static func _as_int(value, default: int) -> int:
+	return int(value) if value is float or value is int else default
+
+static func _as_float(value, default: float) -> float:
+	return float(value) if value is float or value is int else default

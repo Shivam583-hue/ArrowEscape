@@ -1,6 +1,5 @@
 extends Node2D
 
-const ArrowScene = preload("res://scripts/arrow.gd")
 const LEVEL_TIME = 180.0
 
 var level_num: int = 1
@@ -9,7 +8,6 @@ var grid_size: Vector2i
 var cell_size: float
 var grid_origin: Vector2
 var arrows: Dictionary = {}  # Vector2i -> Arrow node (one entry per covered cell)
-var solution: Array = []
 var arrow_list: Array = []  # parallel to level_data.arrows
 var remaining_count: int = 0
 var lives: int = 3
@@ -48,6 +46,7 @@ func _build_ui():
 	bg.color = UITheme.MIST
 	bg.size = Vector2(480, 854)
 	bg.z_index = -1  # keep below this node's own drawing (grid dots)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE  # grid taps arrive via _unhandled_input
 	add_child(bg)
 
 	# Top-left: home and restart
@@ -161,7 +160,6 @@ func _load_level(level: int):
 	# Generate level
 	level_data = LevelGenerator.generate(level_num)
 	grid_size = level_data.grid_size
-	solution = level_data.solution
 	remaining_count = level_data.arrows.size()
 
 	# Calculate grid layout (capped cell size so small boards stay compact)
@@ -174,8 +172,7 @@ func _load_level(level: int):
 	# Create arrow nodes
 	for i in range(level_data.arrows.size()):
 		var arrow_data = level_data.arrows[i]
-		var arrow_node = Node2D.new()
-		arrow_node.set_script(ArrowScene)
+		var arrow_node = Arrow.new()
 		var points = PackedVector2Array()
 		for c in arrow_data.cells:
 			points.append(_grid_to_screen(c))
@@ -208,7 +205,7 @@ func _draw():
 				var screen_pos = _grid_to_screen(pos)
 				draw_circle(screen_pos, dot_radius, Color("#B4BAC7"))
 
-func _input(event):
+func _unhandled_input(event):
 	if input_locked or overlay.visible:
 		return
 
@@ -232,7 +229,7 @@ func _input(event):
 	if not arrows.has(grid_pos):
 		return
 
-	var arrow = arrows[grid_pos]
+	var arrow: Arrow = arrows[grid_pos]
 	if arrow.removing:
 		return
 
@@ -241,15 +238,27 @@ func _input(event):
 	else:
 		_wrong_tap(arrow)
 
-func _is_arrow_free(arrow: Node2D) -> bool:
-	var check: Vector2i = arrow.cells.back() + arrow.direction
+func _is_arrow_free(arrow: Arrow) -> bool:
+	var is_diag = arrow.direction.x != 0 and arrow.direction.y != 0
+	var prev: Vector2i = arrow.cells.back()
+	var check: Vector2i = prev + arrow.direction
 	while check.x >= 0 and check.x < grid_size.x and check.y >= 0 and check.y < grid_size.y:
 		if arrows.has(check) and arrows[check] != arrow:
 			return false
+		if is_diag and _corners_blocked(prev, check, arrow):
+			return false
+		prev = check
 		check += arrow.direction
 	return true
 
-func _escape_arrow(arrow: Node2D):
+# A diagonal step passes between two corner cells; both occupied by OTHER
+# arrows means sliding through would visually cross them.
+func _corners_blocked(a: Vector2i, b: Vector2i, arrow: Arrow) -> bool:
+	var c1 = Vector2i(a.x, b.y)
+	var c2 = Vector2i(b.x, a.y)
+	return arrows.has(c1) and arrows[c1] != arrow and arrows.has(c2) and arrows[c2] != arrow
+
+func _escape_arrow(arrow: Arrow):
 	arrow.removing = true
 	for c in arrow.cells:
 		arrows.erase(c)
@@ -264,22 +273,25 @@ func _escape_arrow(arrow: Node2D):
 		_check_win()
 	)
 
-func _wrong_tap(arrow: Node2D):
+func _wrong_tap(arrow: Arrow):
 	input_locked = true
-	# Slide until the head bumps the first blocking arrow, then bounce back
+	# Slide until the head bumps the first blocker (cell or crossed corner pair)
 	var gap = 0
-	var check: Vector2i = arrow.cells.back() + arrow.direction
+	var is_diag = arrow.direction.x != 0 and arrow.direction.y != 0
+	var prev: Vector2i = arrow.cells.back()
+	var check: Vector2i = prev + arrow.direction
 	while check.x >= 0 and check.x < grid_size.x and check.y >= 0 and check.y < grid_size.y:
 		if arrows.has(check) and arrows[check] != arrow:
 			break
+		if is_diag and _corners_blocked(prev, check, arrow):
+			break
 		gap += 1
+		prev = check
 		check += arrow.direction
-	arrow.animate_blocked(gap * cell_size + cell_size * 0.3)
-	lives -= 1
-	PlayerData.lives = lives
-	if lives <= 0:
-		PlayerData.lose_life()
-	PlayerData.save_data()
+	# Diagonal steps cover sqrt(2) cells worth of pixels
+	var step = cell_size * Vector2(arrow.direction).length()
+	arrow.animate_blocked(gap * step + step * 0.3)
+	lives = PlayerData.lose_life()
 	_update_hud()
 
 	await get_tree().create_timer(0.4).timeout
@@ -382,7 +394,6 @@ func _show_level_complete():
 		if level_num >= 1000:
 			_on_back_pressed()
 		else:
-			lives = PlayerData.LIVES_MAX
 			_load_level(level_num + 1)
 	)
 	screen.add_child(next_btn)
@@ -424,7 +435,7 @@ func _show_game_over():
 		buy_btn.position = Vector2(90, 450)
 		buy_btn.pressed.connect(func():
 			if PlayerData.buy_lives():
-				lives = PlayerData.LIVES_MAX
+				lives = PlayerData.lives
 				overlay.visible = false
 				input_locked = false
 				_update_hud()

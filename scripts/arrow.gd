@@ -1,3 +1,4 @@
+class_name Arrow
 extends Node2D
 
 var cells: Array = []  # Vector2i cells, tail -> head
@@ -48,7 +49,7 @@ func _draw():
 
 	var s_head = slide_offset + body_len
 	var head_pos = _point_at(s_head)
-	var dirv = Vector2(direction)
+	var dirv = Vector2(direction).normalized()  # diagonal dirs have length sqrt(2)
 
 	# Body line, stopping at the arrowhead base
 	var line_end = s_head - head_len * 0.4

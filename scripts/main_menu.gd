@@ -10,6 +10,7 @@ const AMPLITUDE = 116.0
 
 var scroll_container: ScrollContainer
 var path: Control
+var no_lives_toast: Panel
 
 func _ready():
 	_build_ui()
@@ -166,9 +167,29 @@ func _scroll_to_current():
 	scroll_container.scroll_vertical = int(clamp(target, 0.0, path.custom_minimum_size.y - scroll_container.size.y))
 
 func _start_level(level: int):
-	PlayerData.current_level = level
 	if PlayerData.lives <= 0:
-		var refill = PlayerData.get_time_until_refill()
-		if refill <= 0:
+		if PlayerData.get_time_until_refill() <= 0.0:
 			PlayerData.reset_lives()
+		else:
+			_show_no_lives_toast()
+			return
+	PlayerData.current_level = level
 	get_tree().change_scene_to_file("res://scenes/game.tscn")
+
+func _show_no_lives_toast():
+	if is_instance_valid(no_lives_toast):
+		return
+	var mins = int(ceilf(PlayerData.get_time_until_refill() / 60.0))
+	no_lives_toast = Panel.new()
+	no_lives_toast.size = Vector2(300, 46)
+	no_lives_toast.position = Vector2(90, 770)
+	no_lives_toast.add_theme_stylebox_override("panel", UITheme.rounded(UITheme.NAVY, 23))
+	no_lives_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l = UITheme.make_label("Lives refill in %d min" % mins, 17, Color.WHITE, 700)
+	l.size = no_lives_toast.size
+	no_lives_toast.add_child(l)
+	add_child(no_lives_toast)
+	var tw = no_lives_toast.create_tween()
+	tw.tween_interval(1.6)
+	tw.tween_property(no_lives_toast, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(no_lives_toast.queue_free)

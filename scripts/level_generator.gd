@@ -1,6 +1,8 @@
 class_name LevelGenerator
 
 const DIRECTIONS = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
+const DIAGONALS = [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
+const DIAGONALS_FROM_LEVEL = 25
 
 # Arrows are "snakes": an ordered list of cells (tail -> head) that can bend.
 # Tapping one slides the whole arrow along its own path, the head leading
@@ -20,6 +22,13 @@ static func generate(level_num: int) -> Dictionary:
 	var occupied: Dictionary = {}
 	var arrows: Array = []
 
+	# Diagonal arrows are a rare accent: exactly 1 from level 25, one more
+	# every 75 levels, never more than 5 - always far fewer than orthogonals.
+	var diag_quota = 0
+	if level_num >= DIAGONALS_FROM_LEVEL:
+		diag_quota = clampi(1 + (level_num - DIAGONALS_FROM_LEVEL) / 75, 1, 5)
+	var diag_placed = 0
+
 	# Reverse construction: each arrow placed has a clear exit ray relative to
 	# the arrows already on the board, so removing them in reverse placement
 	# order always solves the level. Arrows are added until the board reaches
@@ -34,6 +43,12 @@ static func generate(level_num: int) -> Dictionary:
 		var placed = false
 		var dirs = DIRECTIONS.duplicate()
 		_shuffle(dirs, rng)
+		# Pace diagonals: at most one per ~6 arrows placed so far, so they stay
+		# a small minority even on boards with few (long) arrows
+		if diag_placed < diag_quota and diag_placed * 6 <= arrows.size() and rng.randf() < 0.35:
+			var diags = DIAGONALS.duplicate()
+			_shuffle(diags, rng)
+			dirs = diags + dirs  # try a diagonal first, fall back to orthogonal
 		for dir in dirs:
 			if not _ray_clear(head, dir, occupied, grid_size):
 				continue
@@ -43,6 +58,8 @@ static func generate(level_num: int) -> Dictionary:
 			for c in cells:
 				occupied[c] = true
 			arrows.append({"cells": cells, "dir": dir})
+			if dir.x != 0 and dir.y != 0:
+				diag_placed += 1
 			placed = true
 			break
 		if placed:
@@ -117,6 +134,12 @@ static func _grow_body(head: Vector2i, dir: Vector2i, occupied: Dictionary, grid
 				continue
 			if _on_exit_ray(nc, head, dir):
 				continue
+			if d.x != 0 and d.y != 0:
+				# Diagonal body step must not cross other arrows or itself
+				var c1 = Vector2i(cur.x, nc.y)
+				var c2 = Vector2i(nc.x, cur.y)
+				if (occupied.has(c1) or cells.has(c1)) and (occupied.has(c2) or cells.has(c2)):
+					continue
 			cur = nc
 			travel = d
 			cells.append(nc)
@@ -128,17 +151,27 @@ static func _grow_body(head: Vector2i, dir: Vector2i, occupied: Dictionary, grid
 	cells.reverse()
 	return cells
 
+# True if cell = head + k*dir for some k > 0. Works for orthogonal and
+# diagonal directions: collinear (zero cross product) and ahead (positive dot).
 static func _on_exit_ray(cell: Vector2i, head: Vector2i, dir: Vector2i) -> bool:
 	var delta = cell - head
-	if dir.x == 0:
-		return delta.x == 0 and delta.y * dir.y > 0
-	return delta.y == 0 and delta.x * dir.x > 0
+	return delta.x * dir.y == delta.y * dir.x and delta.x * dir.x + delta.y * dir.y > 0
+
+# A diagonal step from a to b passes between two corner cells; if both are
+# occupied the arrows would visually cross/overlap, so the step is blocked.
+static func _corners_blocked(a: Vector2i, b: Vector2i, occupied: Dictionary) -> bool:
+	return occupied.has(Vector2i(a.x, b.y)) and occupied.has(Vector2i(b.x, a.y))
 
 static func _ray_clear(head: Vector2i, dir: Vector2i, occupied: Dictionary, grid_size: Vector2i) -> bool:
+	var is_diag = dir.x != 0 and dir.y != 0
+	var prev = head
 	var check = head + dir
 	while check.x >= 0 and check.x < grid_size.x and check.y >= 0 and check.y < grid_size.y:
 		if occupied.has(check):
 			return false
+		if is_diag and _corners_blocked(prev, check, occupied):
+			return false
+		prev = check
 		check += dir
 	return true
 
@@ -154,46 +187,48 @@ static func _shuffle(arr: Array, rng: RandomNumberGenerator):
 # then keeps gaining cells as the view "zooms out" (smaller cells), until
 # cells hit the minimum comfortable tap size at 13x16.
 static func _get_level_config(level_num: int) -> Dictionary:
+	# Steep ramp: cell count grows ~1.5x per level early on, capping at 13x16
+	# by level 20 (previously the cap arrived around level 100).
 	var grid_size: Vector2i
-	if level_num <= 3:
+	if level_num <= 2:
 		grid_size = Vector2i(4, 4)
-	elif level_num <= 5:
+	elif level_num == 3:
 		grid_size = Vector2i(5, 5)
-	elif level_num <= 8:
+	elif level_num == 4:
 		grid_size = Vector2i(5, 6)
-	elif level_num <= 11:
+	elif level_num == 5:
 		grid_size = Vector2i(6, 7)
-	elif level_num <= 15:
+	elif level_num == 6:
 		grid_size = Vector2i(7, 8)
-	elif level_num <= 19:
+	elif level_num == 7:
 		grid_size = Vector2i(8, 9)
-	elif level_num <= 24:
+	elif level_num == 8:
 		grid_size = Vector2i(9, 11)
-	elif level_num <= 30:
+	elif level_num <= 10:
 		grid_size = Vector2i(10, 12)
-	elif level_num <= 40:
+	elif level_num <= 13:
 		grid_size = Vector2i(11, 13)
-	elif level_num <= 60:
+	elif level_num <= 16:
 		grid_size = Vector2i(12, 14)
-	elif level_num <= 100:
+	elif level_num <= 19:
 		grid_size = Vector2i(12, 15)
 	else:
 		grid_size = Vector2i(13, 16)
 
 	# Boards stay dense at every size; small boards are easy because they
 	# are small, not because they are sparse.
-	var fill = clampf(0.78 + level_num * 0.005, 0.8, 0.92)
+	var fill = clampf(0.78 + level_num * 0.02, 0.8, 0.92)
 
 	# Longest arrows grow with level, so stubs and giant snakes coexist
-	var max_len = clampi(4 + level_num / 3, 4, grid_size.x + grid_size.y)
-	var bend_chance = minf(0.25 + level_num * 0.01, 0.5)
+	var max_len = clampi(4 + level_num, 4, grid_size.x + grid_size.y)
+	var bend_chance = minf(0.25 + level_num * 0.04, 0.5)
 
 	var difficulty: String
-	if level_num <= 10:
+	if level_num <= 4:
 		difficulty = "Easy"
-	elif level_num <= 35:
+	elif level_num <= 12:
 		difficulty = "Normal"
-	elif level_num <= 150:
+	elif level_num <= 40:
 		difficulty = "Hard"
 	else:
 		difficulty = "Expert"

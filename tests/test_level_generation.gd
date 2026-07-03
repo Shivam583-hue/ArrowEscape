@@ -9,6 +9,20 @@ func _initialize():
 		var data = gen.generate(level)
 		var grid: Vector2i = data.grid_size
 		var errs = _validate(data, grid)
+		# Diagonal arrows: none before 25, then 1..quota and always a small minority
+		var diag_count = 0
+		for a in data.arrows:
+			var dir: Vector2i = a.dir
+			if dir.x != 0 and dir.y != 0:
+				diag_count += 1
+		if level < 25 and diag_count > 0:
+			errs.append("diagonals before level 25")
+		elif level >= 25:
+			var quota = clampi(1 + (level - 25) / 75, 1, 5)
+			if diag_count < 1 or diag_count > quota:
+				errs.append("diag count %d outside 1..%d" % [diag_count, quota])
+			if diag_count * 3 > data.arrows.size():
+				errs.append("too many diagonals: %d of %d" % [diag_count, data.arrows.size()])
 		if errs.size() > 0:
 			failures += 1
 			if failures <= 5:
@@ -34,6 +48,9 @@ func _initialize():
 func _validate(data: Dictionary, grid: Vector2i) -> Array:
 	var errs = []
 	var occupied = {}
+	# Each diagonal segment lives in one unit square; two segments in the same
+	# square (necessarily opposite orientations) means a visual crossing.
+	var diag_squares = {}
 	# Structural checks
 	for i in range(data.arrows.size()):
 		var a = data.arrows[i]
@@ -53,14 +70,21 @@ func _validate(data: Dictionary, grid: Vector2i) -> Array:
 			occupied[c] = i
 			if j > 0:
 				var d: Vector2i = c - cells[j - 1]
-				if abs(d.x) + abs(d.y) != 1:
+				# Steps must be unit-length and of the same kind (orthogonal or
+				# diagonal) as the arrow's facing direction
+				var dir_i: Vector2i = a.dir
+				if maxi(abs(d.x), abs(d.y)) != 1 or abs(d.x) + abs(d.y) != abs(dir_i.x) + abs(dir_i.y):
 					errs.append("arrow %d not contiguous" % i)
-			# Body must not sit on own exit ray
+				if abs(d.x) == 1 and abs(d.y) == 1:
+					var square = Vector2i(mini(c.x, cells[j - 1].x), mini(c.y, cells[j - 1].y))
+					if diag_squares.has(square):
+						errs.append("diagonal segments cross at square %s" % str(square))
+					diag_squares[square] = true
+			# Body must not sit on own exit ray (collinear with dir and ahead of head)
 			if j < cells.size() - 1:
 				var delta = c - head
 				var dir: Vector2i = a.dir
-				var on_ray = (delta.x == 0 and delta.y * dir.y > 0) if dir.x == 0 else (delta.y == 0 and delta.x * dir.x > 0)
-				if on_ray:
+				if delta.x * dir.y == delta.y * dir.x and delta.x * dir.x + delta.y * dir.y > 0:
 					errs.append("arrow %d self-blocks at %s" % [i, str(c)])
 	# Solvability: remove in solution order, each must have clear exit ray
 	if data.solution.size() != data.arrows.size():
@@ -68,12 +92,24 @@ func _validate(data: Dictionary, grid: Vector2i) -> Array:
 	var remaining = occupied.duplicate()
 	for idx in data.solution:
 		var a = data.arrows[idx]
-		var check: Vector2i = a.cells.back() + Vector2i(a.dir)
+		var dir: Vector2i = a.dir
+		var is_diag = dir.x != 0 and dir.y != 0
+		var prev: Vector2i = a.cells.back()
+		var check: Vector2i = prev + dir
 		while check.x >= 0 and check.x < grid.x and check.y >= 0 and check.y < grid.y:
-			if remaining.has(check) and remaining[check] != idx:
+			var blocked = remaining.has(check) and remaining[check] != idx
+			if not blocked and is_diag:
+				# Same rule as the game: sliding between two occupied corner
+				# cells belonging to other arrows counts as blocked
+				var c1 = Vector2i(prev.x, check.y)
+				var c2 = Vector2i(check.x, prev.y)
+				blocked = remaining.has(c1) and remaining[c1] != idx \
+					and remaining.has(c2) and remaining[c2] != idx
+			if blocked:
 				errs.append("solution blocked for arrow %d" % idx)
 				break
-			check += Vector2i(a.dir)
+			prev = check
+			check += dir
 		for c in a.cells:
 			remaining.erase(c)
 	if remaining.size() > 0:
